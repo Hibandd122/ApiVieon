@@ -1,7 +1,7 @@
-# app.py
 from flask import Flask, request, Response, jsonify
 import requests, random, string, time, re
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse, parse_qs
 
 app = Flask(__name__)
 
@@ -45,7 +45,6 @@ def update_vieon_email(auth_token, email):
     r = requests.post(url, headers=headers, data=payload, timeout=15)
     return r.status_code, r.text
 
-# (tùy chọn) check inbox & confirm nếu bạn cần — mình giữ function đơn giản nhưng không bắt buộc
 def extract_vieon_link(html_content, text_content):
     if html_content:
         html = "".join(html_content) if isinstance(html_content, list) else html_content
@@ -59,28 +58,55 @@ def extract_vieon_link(html_content, text_content):
             return m.group(0)
     return None
 
-def check_inbox_and_confirm(mail_token, wait_seconds=60, poll_interval=1):
+def confirm_vieon_email(auth_token, mail_token, wait_seconds=120, poll_interval=2):
     headers = {"Authorization": f"Bearer {mail_token}"}
     url = "https://api.mail.tm/messages"
     deadline = time.time() + wait_seconds
+
     while time.time() < deadline:
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         members = r.json().get("hydra:member", [])
         if members:
-            # xử lý message đầu tiên
             mid = members[0]["id"]
             detail = requests.get(f"{url}/{mid}", headers=headers, timeout=10).json()
             link = extract_vieon_link(detail.get("html", []), detail.get("text", ""))
+
             if link:
                 try:
-                    time.sleep(3)
                     resp = requests.get(link, timeout=15, allow_redirects=True)
-                    return {"status": "confirmed", "resp_status": resp.status_code, "final_url": resp.url}
+                    final_url = resp.url
+                    parsed = urlparse(final_url)
+                    qs = parse_qs(parsed.query)
+                    reg_id = qs.get("register_session_id", [None])[0]
+                    otp_code = qs.get("otp", [None])[0]
+
+                    if reg_id and otp_code:
+                        confirm_url = "https://api.vieon.vn/backend/user/profile/update_email/confirm_otp?platform=web&ui=012021"
+                        payload = {
+                            "register_session_id": reg_id,
+                            "otp_code": otp_code,
+                            "platform": "web",
+                            "ui": "012021"
+                        }
+                        headers2 = {
+                            "authorization": auth_token,
+                            "content-type": "application/x-www-form-urlencoded"
+                        }
+                        r2 = requests.post(confirm_url, headers=headers2, data=payload, timeout=15)
+                        return {
+                            "status": "confirmed",
+                            "resp_status": r2.status_code,
+                            "resp_text": r2.text,
+                            "email": qs.get("email", [""])[0]
+                        }
+                    return {"status": "link_but_no_params", "url": final_url}
+
                 except Exception as e:
                     return {"status": "confirm_error", "error": str(e)}
-            return {"status": "no_link", "subject": detail.get("subject")}
+
         time.sleep(poll_interval)
+
     return {"status": "timeout"}
 
 # ---------- Route ----------
@@ -100,19 +126,14 @@ def create_random_email_pass():
         # tạo account mail.tm
         mail_token = create_mail_account(email, password)
 
-        # cập nhật VieON (không kiểm tra kết quả bắt buộc)
+        # update email lên VieON
         vieon_status, vieon_text = update_vieon_email(auth_token, email)
 
-        # (tùy chọn) check inbox trong 60s để auto confirm
-        confirm_info = check_inbox_and_confirm(mail_token, wait_seconds=120)
+        # check inbox & auto confirm
+        confirm_info = confirm_vieon_email(auth_token, mail_token, wait_seconds=120)
 
-        # Trả về plain text email:password theo yêu cầu
         body = f"{email}:{password}"
-        # Nếu bạn muốn trả JSON thay plain text, đổi thành jsonify(...)
         return Response(body, status=200, mimetype="text/plain")
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
