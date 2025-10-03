@@ -58,7 +58,7 @@ def extract_vieon_link(html_content, text_content):
             return m.group(0)
     return None
 
-def check_inbox_and_confirm(mail_token, wait_seconds=60, poll_interval=3):
+def check_inbox_and_confirm(mail_token, wait_seconds=60, poll_interval=1):
     headers = {"Authorization": f"Bearer {mail_token}"}
     url = "https://api.mail.tm/messages"
     deadline = time.time() + wait_seconds
