@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, request, Response, jsonify
 import requests, random, string, time, re
 from bs4 import BeautifulSoup
@@ -73,6 +74,7 @@ def check_inbox_and_confirm(mail_token, wait_seconds=60, poll_interval=1):
             link = extract_vieon_link(detail.get("html", []), detail.get("text", ""))
             if link:
                 try:
+                    time.sleep(3)
                     resp = requests.get(link, timeout=15, allow_redirects=True)
                     return {"status": "confirmed", "resp_status": resp.status_code, "final_url": resp.url}
                 except Exception as e:
@@ -111,3 +113,6 @@ def create_random_email_pass():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
